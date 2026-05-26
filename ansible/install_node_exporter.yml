@@ -1,0 +1,16 @@
+---
+- name: Instalar Node Exporter en todos los nodos
+  hosts: all
+  become: yes
+  tasks:
+    - name: Instalar prometheus-node-exporter
+      apt:
+        name: prometheus-node-exporter
+        state: present
+        update_cache: yes
+
+    - name: Asegurar que Node Exporter esté corriendo
+      service:
+        name: prometheus-node-exporter
+        state: started
+        enabled: yes

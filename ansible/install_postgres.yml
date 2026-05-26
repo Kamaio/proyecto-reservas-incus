@@ -1,0 +1,19 @@
+---
+- name: Instalar PostgreSQL en db-postgres
+  hosts: db
+  become: yes
+  tasks:
+    - name: Actualizar apt
+      apt:
+        update_cache: yes
+
+    - name: Instalar PostgreSQL
+      apt:
+        name: postgresql
+        state: present
+
+    - name: Asegurar que PostgreSQL esté corriendo
+      service:
+        name: postgresql
+        state: started
+        enabled: yes

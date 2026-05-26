@@ -1,0 +1,31 @@
+---
+- name: Instalar Python y FastAPI en app-api y app-core
+  hosts: api, core
+  become: yes
+  tasks:
+    - name: Actualizar apt
+      apt:
+        update_cache: yes
+
+    - name: Instalar Python y dependencias del sistema
+      apt:
+        name:
+          - python3
+          - python3-pip
+          - python3-venv
+          - python3-full
+        state: present
+
+    - name: Crear entorno virtual
+      command: python3 -m venv /opt/appenv
+      args:
+        creates: /opt/appenv
+
+    - name: Instalar FastAPI y dependencias en el venv
+      pip:
+        name:
+          - fastapi
+          - uvicorn
+          - psycopg2-binary
+          - prometheus-client
+        virtualenv: /opt/appenv

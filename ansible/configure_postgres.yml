@@ -1,0 +1,20 @@
+---
+- name: Configurar PostgreSQL para aceptar conexiones remotas
+  hosts: db
+  become: yes
+  tasks:
+    - name: Permitir conexiones desde la red OVN
+      lineinfile:
+        path: /etc/postgresql/16/main/postgresql.conf
+        regexp: "^#?listen_addresses"
+        line: "listen_addresses = '*'"
+
+    - name: Agregar regla de acceso para appuser
+      lineinfile:
+        path: /etc/postgresql/16/main/pg_hba.conf
+        line: "host    reservas    appuser    10.10.0.0/24    md5"
+
+    - name: Reiniciar PostgreSQL
+      service:
+        name: postgresql
+        state: restarted

@@ -1,0 +1,10 @@
+---
+- name: Dar permisos a appuser sobre las tablas
+  hosts: db
+  become: yes
+  become_user: postgres
+  tasks:
+    - name: Otorgar permisos
+      shell: |
+        psql -d reservas -c "GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO appuser;"
+        psql -d reservas -c "GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO appuser;"

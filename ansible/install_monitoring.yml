@@ -1,0 +1,52 @@
+---
+- name: Instalar Prometheus y Grafana en monitoring
+  hosts: monitoring
+  become: yes
+  tasks:
+    - name: Actualizar apt
+      apt:
+        update_cache: yes
+
+    - name: Instalar Prometheus
+      apt:
+        name: prometheus
+        state: present
+
+    - name: Asegurar que Prometheus esté corriendo
+      service:
+        name: prometheus
+        state: started
+        enabled: yes
+
+    - name: Instalar dependencias de Grafana
+      apt:
+        name:
+          - apt-transport-https
+          - software-properties-common
+          - wget
+        state: present
+
+    - name: Agregar clave GPG de Grafana
+      shell: wget -q -O - https://packages.grafana.com/gpg.key | gpg --dearmor > /etc/apt/keyrings/grafana.gpg
+      args:
+        creates: /etc/apt/keyrings/grafana.gpg
+
+    - name: Agregar repositorio de Grafana
+      shell: echo "deb [signed-by=/etc/apt/keyrings/grafana.gpg] https://packages.grafana.com/oss/deb stable main" > /etc/apt/sources.list.d/grafana.list
+      args:
+        creates: /etc/apt/sources.list.d/grafana.list
+
+    - name: Actualizar apt con repositorio Grafana
+      apt:
+        update_cache: yes
+
+    - name: Instalar Grafana
+      apt:
+        name: grafana
+        state: present
+
+    - name: Asegurar que Grafana esté corriendo
+      service:
+        name: grafana-server
+        state: started
+        enabled: yes

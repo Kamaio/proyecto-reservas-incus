@@ -1,0 +1,41 @@
+---
+- name: Configurar Prometheus para monitorear todos los nodos
+  hosts: monitoring
+  become: yes
+  tasks:
+    - name: Escribir configuración de Prometheus
+      copy:
+        dest: /etc/prometheus/prometheus.yml
+        content: |
+          global:
+            scrape_interval: 15s
+
+          scrape_configs:
+            - job_name: 'prometheus'
+              static_configs:
+                - targets: ['localhost:9090']
+
+            - job_name: 'node-control'
+              static_configs:
+                - targets: ['10.10.0.2:9100']
+
+            - job_name: 'monitoring'
+              static_configs:
+                - targets: ['10.10.0.3:9100']
+
+            - job_name: 'db-postgres'
+              static_configs:
+                - targets: ['10.10.0.4:9100']
+
+            - job_name: 'app-api'
+              static_configs:
+                - targets: ['10.10.0.5:9100']
+
+            - job_name: 'app-core'
+              static_configs:
+                - targets: ['10.10.0.6:9100']
+
+    - name: Reiniciar Prometheus
+      service:
+        name: prometheus
+        state: restarted

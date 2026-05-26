@@ -1,0 +1,33 @@
+---
+- name: Configurar base de datos de reservas
+  hosts: db
+  become: yes
+  tasks:
+    - name: Crear usuario y base de datos
+      become_user: postgres
+      shell: |
+        psql -c "CREATE USER appuser WITH PASSWORD 'password123';" || true
+        psql -c "CREATE DATABASE reservas OWNER appuser;" || true
+
+    - name: Crear tablas
+      become_user: postgres
+      shell: |
+        psql -d reservas -c "
+        CREATE TABLE IF NOT EXISTS recursos (
+          id SERIAL PRIMARY KEY,
+          nombre VARCHAR(100),
+          tipo VARCHAR(50),
+          disponible BOOLEAN DEFAULT TRUE
+        );
+        CREATE TABLE IF NOT EXISTS reservas (
+          id SERIAL PRIMARY KEY,
+          recurso_id INT REFERENCES recursos(id),
+          usuario VARCHAR(100),
+          fecha TIMESTAMP DEFAULT NOW()
+        );
+        INSERT INTO recursos (nombre, tipo) VALUES
+          ('Laboratorio A', 'laboratorio'),
+          ('Laboratorio B', 'laboratorio'),
+          ('Sala de computo 1', 'sala'),
+          ('Proyector 1', 'equipo')
+        ON CONFLICT DO NOTHING;"

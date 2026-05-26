@@ -1,0 +1,12 @@
+---
+- name: Configurar DNS en todos los nodos
+  hosts: all
+  become: yes
+  tasks:
+    - name: Configurar DNS permanente
+      copy:
+        content: "nameserver 8.8.8.8\n"
+        dest: /etc/resolv.conf
+        owner: root
+        group: root
+        mode: '0644'
