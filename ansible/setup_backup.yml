@@ -1,0 +1,34 @@
+---
+- name: Configurar backup automatico de PostgreSQL hacia volumen persistente
+  hosts: db
+  become: yes
+  tasks:
+    - name: Crear script de backup
+      copy:
+        dest: /usr/local/bin/backup-postgres.sh
+        mode: '0755'
+        content: |
+          #!/bin/bash
+          FECHA=$(date +%Y%m%d_%H%M%S)
+          BACKUP_DIR="/mnt/ceph-data/backups/postgres"
+          BACKUP_FILE="$BACKUP_DIR/reservas_$FECHA.sql"
+          mkdir -p $BACKUP_DIR
+          echo "[$FECHA] Iniciando backup de PostgreSQL..."
+          sudo -u postgres pg_dump reservas > $BACKUP_FILE
+          if [ $? -eq 0 ]; then
+              echo "[$FECHA] Backup completado: $BACKUP_FILE"
+          else
+              echo "[$FECHA] Error al generar el backup"
+          fi
+
+    - name: Configurar cron job para backup cada hora
+      copy:
+        dest: /etc/cron.d/postgres-backup
+        mode: '0644'
+        content: |
+          0 * * * * root /usr/local/bin/backup-postgres.sh >> /var/log/backup-postgres.log 2>&1
+
+    - name: Reiniciar cron
+      service:
+        name: cron
+        state: restarted
