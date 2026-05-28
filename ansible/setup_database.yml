@@ -25,6 +25,14 @@
           usuario VARCHAR(100),
           fecha TIMESTAMP DEFAULT NOW()
         );
+        CREATE TABLE IF NOT EXISTS usuarios (
+          id SERIAL PRIMARY KEY,
+          username VARCHAR(100) UNIQUE NOT NULL,
+          password_hash VARCHAR(255) NOT NULL,
+          email VARCHAR(100),
+          activo BOOLEAN DEFAULT TRUE,
+          fecha_registro TIMESTAMP DEFAULT NOW()
+        );
         INSERT INTO recursos (nombre, tipo) VALUES
           ('Laboratorio A', 'laboratorio'),
           ('Laboratorio B', 'laboratorio'),

@@ -28,4 +28,12 @@
           - uvicorn
           - psycopg2-binary
           - prometheus-client
+          - python-jose[cryptography]
+          - passlib
+          - python-multipart
+        virtualenv: /opt/appenv
+
+    - name: Instalar bcrypt version compatible
+      pip:
+        name: bcrypt==4.0.1
         virtualenv: /opt/appenv

@@ -1,0 +1,27 @@
+---
+- name: Configurar ceph-node como almacenamiento persistente
+  hosts: storage
+  become: yes
+  tasks:
+    - name: Actualizar apt
+      apt:
+        update_cache: yes
+
+    - name: Crear estructura de directorios en el volumen
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0777'
+      loop:
+        - /mnt/ceph-data/datos
+        - /mnt/ceph-data/snapshots
+        - /mnt/ceph-data/logs
+        - /mnt/ceph-data/backups/postgres
+
+    - name: Crear archivo README
+      copy:
+        dest: /mnt/ceph-data/README.txt
+        content: |
+          Almacenamiento persistente - Laboratorio de Sistemas Distribuidos
+          Nodo: ceph-node (10.10.0.7)
+          Uso: backups de PostgreSQL y datos de la aplicacion

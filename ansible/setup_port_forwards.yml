@@ -1,0 +1,16 @@
+---
+- name: Configurar reenvios de puerto para acceso externo
+  hosts: localhost
+  gather_facts: no
+  tasks:
+    - name: Reenvio de puerto Grafana
+      command: incus config device add monitoring grafana-port proxy listen=tcp:0.0.0.0:3000 connect=tcp:127.0.0.1:3000
+      ignore_errors: yes
+
+    - name: Reenvio de puerto Prometheus
+      command: incus config device add monitoring prometheus-port proxy listen=tcp:0.0.0.0:9090 connect=tcp:127.0.0.1:9090
+      ignore_errors: yes
+
+    - name: Reenvio de puerto API
+      command: incus config device add app-api api-port proxy listen=tcp:0.0.0.0:8000 connect=tcp:127.0.0.1:8000
+      ignore_errors: yes
