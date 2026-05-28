@@ -79,3 +79,20 @@ resource "incus_instance" "monitoring" {
     properties = { network = "lab-ovn" }
   }
 }
+
+resource "incus_instance" "ceph_node" {
+  name       = "ceph-node"
+  image      = "images:ubuntu/24.04"
+  running    = true
+  depends_on = [incus_network.lab_ovn]
+  device {
+    name = "eth0"
+    type = "nic"
+    properties = { network = "lab-ovn" }
+  }
+}
+
+resource "incus_volume" "ceph_data" {
+  name = "ceph-data"
+  pool = "default"
+}
