@@ -13,18 +13,41 @@
       copy:
         dest: /opt/app/main.py
         content: |
-          from fastapi import FastAPI, HTTPException
+          from fastapi import FastAPI, HTTPException, Depends, Request
+          from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
           from prometheus_client import Counter, generate_latest
           from fastapi.responses import PlainTextResponse
           from pydantic import BaseModel
           from typing import Optional
+          from jose import JWTError, jwt
+          from passlib.context import CryptContext
+          from datetime import datetime, timedelta
           import psycopg2
+          import logging
+          import time
+
+          logging.basicConfig(
+              level=logging.INFO,
+              format="%(asctime)s [%(levelname)s] %(message)s",
+              handlers=[
+                  logging.FileHandler("/var/log/app-api.log"),
+                  logging.StreamHandler()
+              ]
+          )
+          logger = logging.getLogger("app-api")
 
           app = FastAPI(title="API de Reservas")
 
-          requests_total = Counter('reservas_requests_total', 'Total de peticiones')
-          reservas_creadas = Counter('reservas_creadas_total', 'Total de reservas creadas')
-          errores_total = Counter('reservas_errores_total', 'Total de errores')
+          SECRET_KEY = "clave-secreta-laboratorio-2026"
+          ALGORITHM = "HS256"
+          ACCESS_TOKEN_EXPIRE_MINUTES = 60
+
+          pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+          oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
+
+          requests_total = Counter("reservas_requests_total", "Total de peticiones")
+          reservas_creadas = Counter("reservas_creadas_total", "Total de reservas creadas")
+          errores_total = Counter("reservas_errores_total", "Total de errores")
 
           DB_HOST = "10.10.0.4"
           DB_NAME = "reservas"
@@ -45,11 +68,45 @@
               recurso_id: int
               usuario: str
 
+          class UsuarioCreate(BaseModel):
+              username: str
+              password: str
+              email: Optional[str] = None
+
           def get_db():
-              return psycopg2.connect(
-                  host=DB_HOST, dbname=DB_NAME,
-                  user=DB_USER, password=DB_PASS
-              )
+              return psycopg2.connect(host=DB_HOST, dbname=DB_NAME, user=DB_USER, password=DB_PASS)
+
+          def verificar_password(password, password_hash):
+              return pwd_context.verify(password, password_hash)
+
+          def hashear_password(password):
+              return pwd_context.hash(password)
+
+          def crear_token(data: dict):
+              to_encode = data.copy()
+              expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+              to_encode.update({"exp": expire})
+              return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+          def get_usuario_actual(token: str = Depends(oauth2_scheme)):
+              try:
+                  payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+                  username = payload.get("sub")
+                  if username is None:
+                      raise HTTPException(status_code=401, detail="Token invalido")
+                  return username
+              except JWTError:
+                  errores_total.inc()
+                  logger.warning("Intento de acceso con token invalido o expirado")
+                  raise HTTPException(status_code=401, detail="Token invalido o expirado")
+
+          @app.middleware("http")
+          async def log_requests(request: Request, call_next):
+              inicio = time.time()
+              response = await call_next(request)
+              duracion = round((time.time() - inicio) * 1000, 2)
+              logger.info(f"{request.method} {request.url.path} -> {response.status_code} ({duracion}ms)")
+              return response
 
           @app.get("/")
           def root():
@@ -64,20 +121,59 @@
           def metrics():
               return PlainTextResponse(generate_latest())
 
-          # ─── CRUD RECURSOS ───────────────────────────────
+          @app.post("/registro")
+          def registrar_usuario(usuario: UsuarioCreate, admin: str = Depends(get_usuario_actual)):
+              requests_total.inc()
+              conn = get_db()
+              cur = conn.cursor()
+              cur.execute("SELECT id FROM usuarios WHERE username = %s", (usuario.username,))
+              if cur.fetchone():
+                  conn.close()
+                  errores_total.inc()
+                  logger.warning(f"Intento de registro con usuario ya existente: {usuario.username}")
+                  raise HTTPException(status_code=400, detail="El usuario ya existe")
+              password_hash = hashear_password(usuario.password)
+              cur.execute(
+                  "INSERT INTO usuarios (username, password_hash, email) VALUES (%s, %s, %s) RETURNING id",
+                  (usuario.username, password_hash, usuario.email)
+              )
+              id_usuario = cur.fetchone()[0]
+              conn.commit()
+              conn.close()
+              logger.info(f"Usuario {admin} registro nuevo usuario: {usuario.username}")
+              return {"id": id_usuario, "username": usuario.username, "mensaje": "Usuario registrado exitosamente"}
+
+          @app.post("/login")
+          def login(form_data: OAuth2PasswordRequestForm = Depends()):
+              requests_total.inc()
+              conn = get_db()
+              cur = conn.cursor()
+              cur.execute("SELECT id, username, password_hash, activo FROM usuarios WHERE username = %s", (form_data.username,))
+              usuario = cur.fetchone()
+              conn.close()
+              if not usuario or not verificar_password(form_data.password, usuario[2]):
+                  errores_total.inc()
+                  logger.warning(f"Login fallido para usuario: {form_data.username}")
+                  raise HTTPException(status_code=401, detail="Usuario o contraseña incorrectos")
+              if not usuario[3]:
+                  raise HTTPException(status_code=400, detail="Usuario inactivo")
+              token = crear_token({"sub": usuario[1]})
+              logger.info(f"Login exitoso para usuario: {form_data.username}")
+              return {"access_token": token, "token_type": "bearer"}
 
           @app.get("/recursos")
-          def listar_recursos():
+          def listar_recursos(usuario: str = Depends(get_usuario_actual)):
               requests_total.inc()
               conn = get_db()
               cur = conn.cursor()
               cur.execute("SELECT id, nombre, tipo, disponible FROM recursos")
               rows = cur.fetchall()
               conn.close()
+              logger.info(f"Usuario {usuario} listo recursos")
               return [{"id": r[0], "nombre": r[1], "tipo": r[2], "disponible": r[3]} for r in rows]
 
           @app.get("/recursos/{recurso_id}")
-          def obtener_recurso(recurso_id: int):
+          def obtener_recurso(recurso_id: int, usuario: str = Depends(get_usuario_actual)):
               requests_total.inc()
               conn = get_db()
               cur = conn.cursor()
@@ -86,25 +182,24 @@
               conn.close()
               if not row:
                   errores_total.inc()
+                  logger.error(f"Recurso {recurso_id} no encontrado")
                   raise HTTPException(status_code=404, detail="Recurso no encontrado")
               return {"id": row[0], "nombre": row[1], "tipo": row[2], "disponible": row[3]}
 
           @app.post("/recursos")
-          def crear_recurso(recurso: RecursoCreate):
+          def crear_recurso(recurso: RecursoCreate, usuario: str = Depends(get_usuario_actual)):
               requests_total.inc()
               conn = get_db()
               cur = conn.cursor()
-              cur.execute(
-                  "INSERT INTO recursos (nombre, tipo, disponible) VALUES (%s, %s, %s) RETURNING id",
-                  (recurso.nombre, recurso.tipo, recurso.disponible)
-              )
+              cur.execute("INSERT INTO recursos (nombre, tipo, disponible) VALUES (%s, %s, %s) RETURNING id", (recurso.nombre, recurso.tipo, recurso.disponible))
               id_recurso = cur.fetchone()[0]
               conn.commit()
               conn.close()
+              logger.info(f"Usuario {usuario} creo recurso: {recurso.nombre}")
               return {"id": id_recurso, "nombre": recurso.nombre, "tipo": recurso.tipo, "disponible": recurso.disponible}
 
           @app.put("/recursos/{recurso_id}")
-          def actualizar_recurso(recurso_id: int, recurso: RecursoUpdate):
+          def actualizar_recurso(recurso_id: int, recurso: RecursoUpdate, usuario: str = Depends(get_usuario_actual)):
               requests_total.inc()
               conn = get_db()
               cur = conn.cursor()
@@ -113,20 +208,19 @@
               if not row:
                   conn.close()
                   errores_total.inc()
+                  logger.error(f"Intento de actualizar recurso inexistente: {recurso_id}")
                   raise HTTPException(status_code=404, detail="Recurso no encontrado")
               nuevo_nombre = recurso.nombre if recurso.nombre is not None else row[1]
               nuevo_tipo = recurso.tipo if recurso.tipo is not None else row[2]
-              nueva_disponibilidad = recurso.disponible if recurso.disponible is not None else row[3]
-              cur.execute(
-                  "UPDATE recursos SET nombre=%s, tipo=%s, disponible=%s WHERE id=%s",
-                  (nuevo_nombre, nuevo_tipo, nueva_disponibilidad, recurso_id)
-              )
+              nueva_disp = recurso.disponible if recurso.disponible is not None else row[3]
+              cur.execute("UPDATE recursos SET nombre=%s, tipo=%s, disponible=%s WHERE id=%s", (nuevo_nombre, nuevo_tipo, nueva_disp, recurso_id))
               conn.commit()
               conn.close()
-              return {"id": recurso_id, "nombre": nuevo_nombre, "tipo": nuevo_tipo, "disponible": nueva_disponibilidad}
+              logger.info(f"Usuario {usuario} actualizo recurso {recurso_id}")
+              return {"id": recurso_id, "nombre": nuevo_nombre, "tipo": nuevo_tipo, "disponible": nueva_disp}
 
           @app.delete("/recursos/{recurso_id}")
-          def eliminar_recurso(recurso_id: int):
+          def eliminar_recurso(recurso_id: int, usuario: str = Depends(get_usuario_actual)):
               requests_total.inc()
               conn = get_db()
               cur = conn.cursor()
@@ -134,27 +228,28 @@
               if not cur.fetchone():
                   conn.close()
                   errores_total.inc()
+                  logger.error(f"Intento de eliminar recurso inexistente: {recurso_id}")
                   raise HTTPException(status_code=404, detail="Recurso no encontrado")
               cur.execute("DELETE FROM reservas WHERE recurso_id = %s", (recurso_id,))
               cur.execute("DELETE FROM recursos WHERE id = %s", (recurso_id,))
               conn.commit()
               conn.close()
+              logger.info(f"Usuario {usuario} elimino recurso {recurso_id}")
               return {"mensaje": "Recurso eliminado exitosamente"}
 
-          # ─── CRUD RESERVAS ───────────────────────────────
-
           @app.get("/reservas")
-          def listar_reservas():
+          def listar_reservas(usuario: str = Depends(get_usuario_actual)):
               requests_total.inc()
               conn = get_db()
               cur = conn.cursor()
               cur.execute("SELECT id, recurso_id, usuario, fecha FROM reservas")
               rows = cur.fetchall()
               conn.close()
+              logger.info(f"Usuario {usuario} listo reservas")
               return [{"id": r[0], "recurso_id": r[1], "usuario": r[2], "fecha": str(r[3])} for r in rows]
 
           @app.get("/reservas/{reserva_id}")
-          def obtener_reserva(reserva_id: int):
+          def obtener_reserva(reserva_id: int, usuario: str = Depends(get_usuario_actual)):
               requests_total.inc()
               conn = get_db()
               cur = conn.cursor()
@@ -163,11 +258,12 @@
               conn.close()
               if not row:
                   errores_total.inc()
+                  logger.error(f"Reserva {reserva_id} no encontrada")
                   raise HTTPException(status_code=404, detail="Reserva no encontrada")
               return {"id": row[0], "recurso_id": row[1], "usuario": row[2], "fecha": str(row[3])}
 
           @app.post("/reservas")
-          def crear_reserva(reserva: ReservaCreate):
+          def crear_reserva(reserva: ReservaCreate, usuario: str = Depends(get_usuario_actual)):
               requests_total.inc()
               conn = get_db()
               cur = conn.cursor()
@@ -176,24 +272,24 @@
               if not recurso:
                   conn.close()
                   errores_total.inc()
+                  logger.error(f"Recurso {reserva.recurso_id} no encontrado al crear reserva")
                   raise HTTPException(status_code=404, detail="Recurso no encontrado")
               if not recurso[0]:
                   conn.close()
                   errores_total.inc()
+                  logger.warning(f"Intento de reservar recurso no disponible: {reserva.recurso_id}")
                   raise HTTPException(status_code=400, detail="Recurso no disponible")
-              cur.execute(
-                  "INSERT INTO reservas (recurso_id, usuario) VALUES (%s, %s) RETURNING id",
-                  (reserva.recurso_id, reserva.usuario)
-              )
+              cur.execute("INSERT INTO reservas (recurso_id, usuario) VALUES (%s, %s) RETURNING id", (reserva.recurso_id, reserva.usuario))
               id_reserva = cur.fetchone()[0]
               cur.execute("UPDATE recursos SET disponible = FALSE WHERE id = %s", (reserva.recurso_id,))
               conn.commit()
               reservas_creadas.inc()
               conn.close()
+              logger.info(f"Usuario {usuario} creo reserva {id_reserva} para recurso {reserva.recurso_id}")
               return {"id": id_reserva, "recurso_id": reserva.recurso_id, "usuario": reserva.usuario, "mensaje": "Reserva creada exitosamente"}
 
           @app.put("/reservas/{reserva_id}")
-          def actualizar_reserva(reserva_id: int, usuario: str):
+          def actualizar_reserva(reserva_id: int, nuevo_usuario: str, usuario: str = Depends(get_usuario_actual)):
               requests_total.inc()
               conn = get_db()
               cur = conn.cursor()
@@ -201,14 +297,16 @@
               if not cur.fetchone():
                   conn.close()
                   errores_total.inc()
+                  logger.error(f"Intento de actualizar reserva inexistente: {reserva_id}")
                   raise HTTPException(status_code=404, detail="Reserva no encontrada")
-              cur.execute("UPDATE reservas SET usuario = %s WHERE id = %s", (usuario, reserva_id))
+              cur.execute("UPDATE reservas SET usuario = %s WHERE id = %s", (nuevo_usuario, reserva_id))
               conn.commit()
               conn.close()
-              return {"id": reserva_id, "usuario": usuario, "mensaje": "Reserva actualizada exitosamente"}
+              logger.info(f"Usuario {usuario} actualizo reserva {reserva_id}")
+              return {"id": reserva_id, "usuario": nuevo_usuario, "mensaje": "Reserva actualizada exitosamente"}
 
           @app.delete("/reservas/{reserva_id}")
-          def cancelar_reserva(reserva_id: int):
+          def cancelar_reserva(reserva_id: int, usuario: str = Depends(get_usuario_actual)):
               requests_total.inc()
               conn = get_db()
               cur = conn.cursor()
@@ -217,11 +315,13 @@
               if not reserva:
                   conn.close()
                   errores_total.inc()
+                  logger.error(f"Intento de cancelar reserva inexistente: {reserva_id}")
                   raise HTTPException(status_code=404, detail="Reserva no encontrada")
               cur.execute("UPDATE recursos SET disponible = TRUE WHERE id = %s", (reserva[0],))
               cur.execute("DELETE FROM reservas WHERE id = %s", (reserva_id,))
               conn.commit()
               conn.close()
+              logger.info(f"Usuario {usuario} cancelo reserva {reserva_id}")
               return {"mensaje": "Reserva cancelada, recurso disponible nuevamente"}
 
     - name: Crear servicio systemd para la API

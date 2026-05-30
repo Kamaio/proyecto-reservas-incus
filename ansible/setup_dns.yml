@@ -1,5 +1,5 @@
 ---
-- name: Configurar DNS en todos los nodos
+- name: Configurar DNS permanente en todos los nodos
   hosts: all
   become: yes
   tasks:
@@ -10,3 +10,16 @@
         owner: root
         group: root
         mode: '0644'
+
+    - name: Evitar que systemd-resolved sobreescriba el DNS
+      lineinfile:
+        path: /etc/systemd/resolved.conf
+        regexp: "^#?DNS="
+        line: "DNS=8.8.8.8"
+        create: yes
+
+    - name: Reiniciar systemd-resolved
+      service:
+        name: systemd-resolved
+        state: restarted
+      ignore_errors: yes

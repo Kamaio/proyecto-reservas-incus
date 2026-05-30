@@ -1,0 +1,19 @@
+---
+- name: Crear usuario inicial en la API
+  hosts: api
+  become: yes
+  tasks:
+    - name: Esperar que la API esté lista
+      wait_for:
+        port: 8000
+        delay: 5
+        timeout: 30
+
+    - name: Crear usuario administrador inicial
+      shell: |
+        curl -s -X POST "http://localhost:8000/registro" \
+          -H "Content-Type: application/json" \
+          -d '{"username": "admin", "password": "admin123", "email": "admin@lab.com"}' || true
+      ignore_errors: yes
+      args:
+        warn: false
