@@ -71,3 +71,7 @@ echo " Usuario inicial de la API:"
 echo "   Username: admin"
 echo "   Password: admin123"
 echo "================================================"
+
+echo ""
+echo ">>> Desplegando frontend..."
+ansible-playbook -i hosts.ini deploy_frontend.yml

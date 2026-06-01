@@ -1,0 +1,47 @@
+---
+- name: Desplegar frontend en contenedor frontend
+  hosts: localhost
+  gather_facts: no
+  tasks:
+    - name: Crear contenedor frontend
+      command: incus launch images:ubuntu/24.04 frontend --network lab-ovn
+      ignore_errors: yes
+
+    - name: Configurar DNS en frontend
+      command: incus exec frontend -- bash -c "echo 'nameserver 8.8.8.8' > /etc/resolv.conf"
+
+    - name: Instalar nginx
+      command: incus exec frontend -- apt install -y nginx
+
+    - name: Habilitar nginx
+      command: incus exec frontend -- systemctl enable --now nginx
+
+    - name: Copiar archivos del frontend
+      command: incus file push -r {{ playbook_dir }}/../frontend-app/ frontend/var/www/html/
+
+    - name: Configurar nginx
+      command: >
+        incus exec frontend -- bash -c "cat > /etc/nginx/sites-available/default << 'NGINX'
+        server {
+            listen 80;
+            root /var/www/html/frontend-app;
+            index index.html;
+            location / {
+                try_files \$uri \$uri/ /index.html;
+            }
+            location /api/ {
+                proxy_pass http://10.10.0.5:8000/;
+                proxy_set_header Host \$host;
+                proxy_set_header X-Real-IP \$remote_addr;
+                proxy_set_header Authorization \$http_authorization;
+                proxy_pass_header Authorization;
+            }
+        }
+        NGINX"
+
+    - name: Reiniciar nginx
+      command: incus exec frontend -- systemctl restart nginx
+
+    - name: Agregar reenvio de puerto para frontend
+      command: incus config device add frontend frontend-port proxy listen=tcp:0.0.0.0:80 connect=tcp:127.0.0.1:80
+      ignore_errors: yes

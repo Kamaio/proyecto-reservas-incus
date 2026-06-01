@@ -96,3 +96,15 @@ resource "incus_volume" "ceph_data" {
   name = "ceph-data"
   pool = "default"
 }
+
+resource "incus_instance" "frontend" {
+  name       = "frontend"
+  image      = "images:ubuntu/24.04"
+  running    = true
+  depends_on = [incus_network.lab_ovn]
+  device {
+    name = "eth0"
+    type = "nic"
+    properties = { network = "lab-ovn" }
+  }
+}
