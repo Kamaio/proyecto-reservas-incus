@@ -121,6 +121,17 @@
           def metrics():
               return PlainTextResponse(generate_latest())
 
+          @app.get("/usuarios")
+          def listar_usuarios(usuario: str = Depends(get_usuario_actual)):
+              requests_total.inc()
+              conn = get_db()
+              cur = conn.cursor()
+              cur.execute("SELECT id, username, email, activo, fecha_registro FROM usuarios")
+              rows = cur.fetchall()
+              conn.close()
+              logger.info(f"Usuario {usuario} listo usuarios")
+              return [{"id": r[0], "username": r[1], "email": r[2], "activo": r[3], "fecha_registro": str(r[4])} for r in rows]
+
           @app.post("/registro")
           def registrar_usuario(usuario: UsuarioCreate, admin: str = Depends(get_usuario_actual)):
               requests_total.inc()
@@ -140,7 +151,7 @@
               id_usuario = cur.fetchone()[0]
               conn.commit()
               conn.close()
-              logger.info(f"Usuario {admin} registro nuevo usuario: {usuario.username}")
+              logger.info(f"Usuario registrado exitosamente: {usuario.username}")
               return {"id": id_usuario, "username": usuario.username, "mensaje": "Usuario registrado exitosamente"}
 
           @app.post("/login")

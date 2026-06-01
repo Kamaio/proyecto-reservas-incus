@@ -39,6 +39,10 @@
               static_configs:
                 - targets: ['10.10.0.7:9100']
 
+            - job_name: 'frontend'
+              static_configs:
+                - targets: ['10.10.0.8:9100']
+
     - name: Reiniciar Prometheus
       service:
         name: prometheus
